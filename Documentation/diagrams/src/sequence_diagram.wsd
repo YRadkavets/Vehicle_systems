@@ -1,0 +1,24 @@
+@startuml seq_diagram
+
+actor User as U
+participant STM32 as STM
+participant GPS as GPS
+participant OLED as OLED
+participant POTENTIOMETERS as P
+participant MAGNETOMETER as M
+participant SERVOS as S
+
+U -> P : Set coordinates manualy
+P -> STM : Set coordinates manualy
+U -> STM : Set coordinates via UART 
+
+GPS -> STM : latitude and UTC
+M -> STM : North direction
+
+STM -> S : angles in horizontal coordinate system
+STM -> OLED: coordinates
+
+
+
+
+@enduml

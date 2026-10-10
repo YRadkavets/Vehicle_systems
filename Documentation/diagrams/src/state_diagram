@@ -1,0 +1,34 @@
+@startuml State diagram
+hide empty description
+
+
+
+
+State "<b>SetUp</b>\n<i>Set all configurations</i>" as SetUp
+State "<b>Set Coordinates Manualy</b>\n<i>Move servos with potentiometers</i>" as Manual
+State "<b>Set Coordinatesvia UART</b>\n<i>Recieves coordinates from User</i>" as SetUART
+State "<b>Move To Target</b>\n<i>Turn servos on recieved coordinates</i>" as Move
+State "<b>Follow Target</b>\n<i>Follows Targt point</i>" as Follow
+
+
+[*] --> SetUp 
+SetUp-->Manual:Button "Manual"
+SetUp-->SetUART:Button "UART"
+SetUART --> Move: Button "UART"
+Move --> Follow : current_position == target_postion
+Manual--> Follow : Button "Manual"
+Follow --> Manual :Button "Manual"
+Follow --> SetUART : Button UART
+
+state Follow{
+    State "<b>Read current position</b>\n" as Read
+    State "<b>Update target postion</b>\n" as Update
+    State "<b>Move to new position</b>\n" as MoveNew
+   
+    Read-->Update
+    Update -->MoveNew
+    MoveNew--> Read
+}  
+
+
+@enduml
