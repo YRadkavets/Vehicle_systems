@@ -23,6 +23,9 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+#include <ssd1306.h>
+#include <ssd1306_fonts.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,6 +47,8 @@
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
 
+I2C_HandleTypeDef hi2c1;
+
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
@@ -53,6 +58,129 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+//temperature
+static const uint8_t TMP102_ADDR = 0x48 << 1; // Use 8-bit address
+static const uint8_t REG_TEMP = 0x00;
+
+//GPS
+uint8_t rx_byte;
+char gps_buffer[128];
+uint8_t gps_index = 0;
+volatile uint8_t line_ready = 0;
+char gps_line[128];
+
+typedef struct {
+    uint8_t fix;          // 1 = jest sygnał ('A'), 0 = brak ('V')
+    uint8_t hours;        // Czas UTC
+    uint8_t minutes;
+    uint8_t seconds;
+    uint8_t day;
+    uint8_t month;
+    uint16_t year;
+    double latitude;      // Stopnie dziesiętne (np. 52.229770)
+    double longitude;     // Stopnie dziesiętne (np. 21.012220)
+} GPS_Data_t;
+
+GPS_Data_t gps_data = {0};
+
+// Konwersja formatu NMEA (DDMM.MMMM) na stopnie dziesiętne (DD.DDDDDD)
+double NMEA_To_Decimal(double nmea_val, char quadrant)
+{
+    int degrees = (int)(nmea_val / 100);
+    double minutes = nmea_val - (degrees * 100);
+    double dec = degrees + (minutes / 60.0);
+
+    if (quadrant == 'S' || quadrant == 'W') {
+        dec = -dec;
+    }
+    return dec;
+}
+
+// Bezpieczne wyciąganie kolejnego pola między przecinkami (obsługuje puste pola ",,")
+char* get_next_token(char **str)
+{
+    if (*str == NULL) return NULL;
+    char *start = *str;
+    char *end = strpbrk(start, ",*");
+    if (end != NULL) {
+        *end = '\0';
+        *str = end + 1;
+    } else {
+        *str = NULL;
+    }
+    return start;
+}
+
+// Parser ramki $GNRMC / $GPRMC
+void GPS_Parse_RMC(char *line, GPS_Data_t *gps)
+{
+    if (strncmp(line, "$GNRMC", 6) != 0 && strncmp(line, "$GPRMC", 6) != 0) {
+        return; // Ignoruj inne ramki
+    }
+
+    char *rest = line;
+    char *token;
+    int field = 0;
+
+    double raw_lat = 0.0, raw_lon = 0.0;
+    char lat_dir = 'N', lon_dir = 'E';
+
+    while ((token = get_next_token(&rest)) != NULL)
+    {
+        switch (field)
+        {
+            case 1: // Czas UTC: HHMMSS.sss (czas bywa dostępny jeszcze przed złapaniem fixa 3D!)
+                if (strlen(token) >= 6) {
+                    int t = atoi(token);
+                    gps->hours   = (t / 10000);
+                    gps->minutes = (t % 10000) / 100;
+                    gps->seconds = (t % 100);
+                }
+                break;
+
+            case 2: // Status: 'A' = Active, 'V' = Void
+                gps->fix = (token[0] == 'A') ? 1 : 0;
+                break;
+
+            case 3: // Szerokość (DDMM.MMMM)
+                if (strlen(token) > 0) raw_lat = atof(token);
+                break;
+
+            case 4: // Półkula N/S
+                if (strlen(token) > 0) lat_dir = token[0];
+                break;
+
+            case 5: // Długość (DDDMM.MMMM)
+                if (strlen(token) > 0) raw_lon = atof(token);
+                break;
+
+            case 6: // Półkula E/W
+                if (strlen(token) > 0) lon_dir = token[0];
+                break;
+
+            case 9: // Data: DDMMYY
+                if (strlen(token) == 6) {
+                    int d = atoi(token);
+                    gps->day   = (d / 10000);
+                    gps->month = (d % 10000) / 100;
+                    gps->year  = 2000 + (d % 100);
+                }
+                break;
+        }
+        field++;
+    }
+
+    if (gps->fix) {
+        gps->latitude  = NMEA_To_Decimal(raw_lat, lat_dir);
+        gps->longitude = NMEA_To_Decimal(raw_lon, lon_dir);
+    }
+}
+
+
 
 /* USER CODE END PV */
 
@@ -67,6 +195,7 @@ static void MX_ADC2_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 void servo_control(TIM_HandleTypeDef *htim, uint32_t Channel, float degree)
 {
@@ -133,16 +262,30 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-int16_t probeX;
+
+//oled
+char myText[] = ":(";
+char retVal;
+
+
+// temperature
+HAL_StatusTypeDef ret; 	// to hold communication errors if such occur
+uint8_t buf[12]; 			// to hold the character string for UART communication or the bytes from the TMP102 chip
+int16_t val; 				// to hold raw value from the TMP102 chip
+float temp_c;
+
+//magnetometer
 int16_t magX;
 int16_t magY;
 int16_t magZ;
+
 char msg[1000];
-uint8_t buffer[100];
-uint8_t buf_spi[6];
 float degree_1;
 float degree_2;
 uint8_t read;
+
+
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -173,10 +316,21 @@ uint8_t read;
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_SPI1_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+
+  // oled
+  ssd1306_Init();
+   ssd1306_SetCursor(0, 5);
+   retVal = ssd1306_WriteString(myText, Font_16x26, White);
+   ssd1306_UpdateScreen();
+
+  //servos
+  HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // Start the timer 3 for PWM on Channel 2 (PC7)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);  // Start the timer 2 for PWM on Channel 2 (PB10)
 
+  //magnetometer
   do {
 	  write_spi(ICM20648_REG_BANK_SEL, 0x00);
 	   read_spi(&read,ICM20648_REG_WHO_AM_I);
@@ -214,114 +368,9 @@ uint8_t read;
      spi_slave0_read(0x10, 0x0A);
      HAL_Delay(20);
      write_spi(ICM20648_REG_BANK_SEL, 0x00);
-/*
-     // mag setup starts here
-         write_spi(0x09, 0x01); // odr align
-         HAL_Delay(5);
-
-         write_spi(ICM20648_REG_BANK_SEL, 0x00);    // b0
-         HAL_Delay(5);
-
-
-         read_spi(*read,ICM20648_REG_USER_CTRL); // reset master , enable master (mask 00010010)
-         read |= 0x12;
-         write_spi(ICM_USER_CTRL, read);
-         HAL_Delay(100);
-
-
-         write_spi(ICM20648_REG_BANK_SEL, 0x30);    // bank 3
-         HAL_Delay(5);
-
-
-         write_spi(ICM20648_REG_I2C_MST_CTRL, 0x07);// 400kHz i2c freq
-         HAL_Delay(10);
-
-         write_spi(ICM20648_REG_BANK_SEL, 0x00);
-         HAL_Delay(5);
-
-         SPI_write(ICM_LP_CONFIG, (1 << 6)); // i2c master in duty cycle mode
-         HAL_Delay(10);
-
-         SPI_write(ICM_REG_BANK_SEL, ICM_BANK_3);
-         HAL_Delay(5);
-
-         SPI_write(ICM20648_REG_I2C_MST_ODR_CONFIG, 0x03);    // odr to 137Hz
-         HAL_Delay(10);
-
-         SPI_write(ICM_I2C_SLV0_ADDR, ICM_MAG_SLAVE_ADDR);   // reset mag
-         SPI_write(ICM_I2C_SLV0_REG, 0x32);
-         SPI_write(ICM_I2C_SLV0_DO, 0x01);
-         SPI_write(ICM_I2C_SLV0_CTRL, 0x80 | 0x01);
-         HAL_Delay(50);
-
-         SPI_write(ICM_I2C_SLV0_ADDR, ICM_MAG_SLAVE_ADDR);    // put into continuous mode 4
-         SPI_write(ICM_I2C_SLV0_REG, ICM_MAG_CTRL2);
-         SPI_write(ICM_I2C_SLV0_D0, (1 << 3));
-         SPI_write(ICM_I2C_SLV0_CTRL, 0x80 | 0x01);
-         HAL_Delay(50);
-
-         SPI_write(ICM_I2C_SLV0_ADDR, ICM_MAG_SLAVE_ADDR | 0x80);    // read once, odr handles rest
-         SPI_write(ICM_I2C_SLV0_REG, 0x10);
-         SPI_write(ICM_I2C_SLV0_CTRL, 0x80 | 9);
-         HAL_Delay(100);
-
-         SPI_write(ICM_REG_BANK_SEL, ICM_BANK_0);
-         HAL_Delay(5);
-
-         uint8_t status = SPI_read(ICM_WHO_AM_I);
-         HAL_Delay(100);
-
-*/
 
 
 
-     write_spi(ICM20648_REG_BANK_SEL, 0x00);
-     read_spi(&read,0x3B);
-     sprintf(msg, "%hd\r\n", read);
-     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-     read_spi(&read,0x3C);
-     sprintf(msg, "%hd\r\n", read);
-     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-     read_spi(&read,0x3D);
-	 sprintf(msg, "%hd\r\n", read);
-	 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-	 read_spi(&read,0x3E);
-	 sprintf(msg, "%hd\r\n", read);
-	 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-	 read_spi(&read,0x3F);
-	 sprintf(msg, "%hd\r\n", read);
-	 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-     read_spi(&read,0x40);
-     sprintf(msg, "%hd\r\n", read);
-     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-     read_spi(&read,0x41);
-     sprintf(msg, "%hd\r\n", read);
-     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-     read_spi(&read,0x42);
-	 sprintf(msg, "%hd\r\n", read);
-	 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-
-
-
-
-
-  /*
-  char *test_msg = "Nucleo is awake and talking to PC!\r\n";
-  HAL_UART_Transmit(&huart2, (uint8_t*)test_msg, strlen(test_msg), 1000);
-  char *rx_data="$PCAS10,3*1F\r\n";
-  HAL_UART_Transmit(&huart1, (uint8_t*)rx_data, strlen(rx_data), 100);
-  char *test_msg_2 = "StartReboot\r\n";
-  HAL_UART_Transmit(&huart2, (uint8_t*)test_msg_2, strlen(test_msg_2), 1000);
-  char *cold_start = "$PCAS10,2*1E\r\n";
-  HAL_UART_Transmit(&huart1, (uint8_t*)cold_start, strlen(cold_start), 100);
-  */
 
 
   /* USER CODE END 2 */
@@ -331,49 +380,18 @@ uint8_t read;
 
   while (1)
   {
-
+	  //servos
 	  degree_1=read_potentiometer(&hadc1 );
 	  degree_2=read_potentiometer(&hadc2 );
 	  servo_control(&htim2,TIM_CHANNEL_3,degree_2);
 	  servo_control(&htim3,TIM_CHANNEL_2,degree_1);
 	  //sprintf(msg,"%f\r\n", degree_2);
 
-	  /*
-	  //HAL_UART_Transmit(&huart2,(uint8_t*)msg,strlen(msg),1000);
 
-	  HAL_UART_Receive(&huart1, (uint8_t*)buffer, 100, 1000);
+	  // magnetometer
 
-	  if (HAL_UART_Receive(&huart1, (uint8_t*)buffer, 100, 1000)== HAL_OK )
-	   {
-		// If successful, transmit that exact 1 byte to the PC
-		  HAL_UART_Transmit(&huart2, (uint8_t*)buffer, 100, 100);
-	   }
-	   */
 
-	  /*
-	  read_spi(&read,ICM20648_REG_ACCEL_XOUT_H_SH);
-	  probeX=read<<8;
-	  read_spi(&read,ICM20648_REG_ACCEL_XOUT_L_SH);
-	  probeX=probeX|read;
-	  sprintf(msg, "%hd\r\n", probeX);
-	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-      */
-	  /*
-	  write_spi(ICM20648_REG_BANK_SEL, 0x00);
-	  read_spi(&read,0x3B);
-	  sprintf(msg, "%hd\r\n", read);
-	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-	  if (read){
-		  read_spi(&read,0x3C);
-		  magX=read<<8;
-		  read_spi(&read,0x3D);
-		  magX=magX|read;
-		  sprintf(msg, "%hd\r\n", magX);
-		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-	  }
-
-		*/
-	  write_spi(ICM20648_REG_BANK_SEL, 0x00); // Ensure Bank 0 is selected
+	  	  write_spi(ICM20648_REG_BANK_SEL, 0x00); // Ensure Bank 0 is selected
 
 	  	  uint8_t st1;
 	  	  read_spi(&st1, 0x3B); // Read ST1 (Status 1) register
@@ -391,18 +409,107 @@ uint8_t read;
 
 	  		  // CRITICAL: You MUST read ST2 (0x42) at the end of every cycle.
 	  		  // If you do not read ST2, the AK09916 locks its data registers and stops updating!
-	  		  read_spi(&st2, 0x42);
+	  		  read_spi(&st2, 0x43);
 
 	  		  // Reconstruct the 16-bit values correctly (Little-Endian)
 	  		  magX = (int16_t)((hxh << 8) | hxl);
 	  		  magY = (int16_t)((hyh << 8) | hyl);
 	  		  magZ = (int16_t)((hzh << 8) | hzl);
 
-	  		  sprintf(msg, "X:%hd Y:%hd Z:%hd\r\n", magX, magY, magZ);
-	  		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+	  		  //sprintf(msg, "X:%hd Y:%hd Z:%hd\r\n", magX, magY, magZ);
+	  		  //HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
 	  	  }
 
-	        HAL_Delay(10); // Small delay to prevent flooding the serial monitor
+
+			// cound directions in radians
+			float heading = atan2((float)magY, (float)magX);
+
+			// radians to angles
+			heading = heading * 180.0 / 3.14159265;
+
+			// Normalisation
+			if (heading < 0) {
+				heading += 360.0;
+			}
+			//sprintf(msg, "direction %f\r\n", heading);
+			//HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+			// heading = 0 (lub 360) oznacza Północ
+			// heading = 90 oznacza Wschód
+			// heading = 180 oznacza Południe
+			// heading = 270 oznacza Zachód
+
+		 // gps
+		 if (line_ready)
+		     {
+		         line_ready = 0;
+
+		         // Parsujemy tylko gdy przyszła ramka $GNRMC lub $GPRMC
+		         if (strncmp(gps_line, "$GNRMC", 6) == 0 || strncmp(gps_line, "$GPRMC", 6) == 0)
+		         {
+		             GPS_Parse_RMC(gps_line, &gps_data);
+
+		             if (gps_data.fix)
+		             {
+		                 // Mamy sygnał z satelitów!
+		                 snprintf(msg, sizeof(msg),
+		                          " UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f\r\n",
+		                          gps_data.hours, gps_data.minutes, gps_data.seconds,
+		                          gps_data.day, gps_data.month, gps_data.year,
+		                          gps_data.latitude, gps_data.longitude);
+		             }
+		             else
+		             {
+		                 // Brak fixa (np. w budynku), ale czas z satelitów lub RTC modułu może już płynąć
+		                 snprintf(msg, sizeof(msg),
+		                          "Szukam satelitow... Czas UTC: %02d:%02d:%02d\r\n",
+		                          gps_data.hours, gps_data.minutes, gps_data.seconds);
+		             }
+
+		            // HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+		         }
+		     }
+
+
+		 // temperature
+
+		 // Tell TMP102 that we want to read from the temperature register
+		buf[0] = REG_TEMP;
+		ret = HAL_I2C_Master_Transmit(&hi2c1, TMP102_ADDR, buf, 1, 200);
+			if ( ret != HAL_OK ) {
+			  strcpy((char*)buf, "Error Tx\r\n");
+			}
+			else{
+		   // Read 2 bytes from the temperature register
+		   ret = HAL_I2C_Master_Receive(&hi2c1, TMP102_ADDR, buf, 2, 200);
+			  if ( ret != HAL_OK ) {
+				strcpy((char*)buf, "Error Rx\r\n");
+			  } else {
+
+				//Combine the bytes
+				val = ((int16_t)buf[0] << 4) | (buf[1] >> 4);
+
+				// Convert to 2's complement, since temperature can be negative
+				if ( val > 0x7FF ) {
+					val |= 0xF000;
+				}
+
+				// Convert to float temperature value (Celsius)
+				temp_c = val * 0.0625;
+
+				// Convert temperature to decimal format
+				temp_c *= 100;
+				sprintf((char*)buf,"%u.%u C\r\n",
+					  ((unsigned int)temp_c / 100),
+					  ((unsigned int)temp_c % 100));
+			  }
+
+			}
+
+
+
+
+	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 10);
+
 
 
     /* USER CODE END WHILE */
@@ -612,6 +719,54 @@ static void MX_ADC2_Init(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x10D19CE4;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -765,7 +920,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 9600;
+  huart1.Init.BaudRate = 115200;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -859,7 +1014,41 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        char c = (char)rx_byte;
 
+        // Re-arm interrupt immediately (takes < 2 microseconds)
+        HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+
+        if (gps_index < sizeof(gps_buffer) - 1)
+        {
+            gps_buffer[gps_index++] = c;
+            if (c == '\n') // End of NMEA sentence
+            {
+                gps_buffer[gps_index] = '\0';
+                strcpy(gps_line, gps_buffer);
+                line_ready = 1;
+                gps_index = 0;
+            }
+        }
+        else
+        {
+            gps_index = 0; // Prevent buffer overflow
+        }
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+    }
+}
 /* USER CODE END 4 */
 
 /**
