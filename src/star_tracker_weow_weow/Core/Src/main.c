@@ -247,6 +247,148 @@ void spi_slave0_read( uint8_t SLV_REG, uint8_t len){
 
 
 }
+
+
+float read_magnetometer(int16_t *magX,int16_t *magY,int16_t *magZ, uint8_t print)
+{
+	  write_spi(ICM20648_REG_BANK_SEL, 0x00); // Ensure Bank 0 is selected
+
+	  uint8_t st1;
+	  read_spi(&st1, 0x3B); // Read ST1 (Status 1) register
+
+	  // Check if the "Data Ready" bit (bit 0) is set to 1
+	  if (st1 & 0x01) {
+		  uint8_t hxl, hxh, hyl, hyh, hzl, hzh, st2;
+
+		  read_spi(&hxl, 0x3C); // X Low
+		  read_spi(&hxh, 0x3D); // X High
+		  read_spi(&hyl, 0x3E); // Y Low
+		  read_spi(&hyh, 0x3F); // Y High
+		  read_spi(&hzl, 0x40); // Z Low
+		  read_spi(&hzh, 0x41); // Z High
+
+		  // CRITICAL: You MUST read ST2 (0x42) at the end of every cycle.
+		  // If you do not read ST2, the AK09916 locks its data registers and stops updating!
+		  read_spi(&st2, 0x43);
+
+		  // Reconstruct the 16-bit values correctly (Little-Endian)
+		  *magX = (int16_t)((hxh << 8) | hxl);
+		  *magY = (int16_t)((hyh << 8) | hyl);
+		  *magZ = (int16_t)((hzh << 8) | hzl);
+
+
+	  }
+
+
+		// cound directions in radians
+		float heading = atan2((float)*magY, (float)*magX);
+
+		// radians to angles
+		heading = heading * 180.0 / 3.14159265;
+
+		// Normalisation
+		if (heading < 0) {
+			heading += 360.0;
+		}
+
+		if (print>0)
+		{
+		  char msg[50];
+		  sprintf(msg, "X:%hd Y:%hd Z:%hd\r\n", *magX, *magY, *magZ);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+		  sprintf(msg, "direction %f\r\n", heading);
+		  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+		}
+
+					// heading = 0 (lub 360) N
+					// heading = 90 W
+					// heading = 180 S
+					// heading = 270 E
+		return heading;
+}
+
+
+
+
+void read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
+		{
+		if (*line_ready)
+				     {
+				         *line_ready = 0;
+
+				         // Parsujemy tylko gdy przyszła ramka $GNRMC lub $GPRMC
+				         if (strncmp(gps_line, "$GNRMC", 6) == 0 || strncmp(gps_line, "$GPRMC", 6) == 0)
+				         {
+				             GPS_Parse_RMC(gps_line, gps_data);
+				         if (print){
+				        	 char msg[100];
+				             if (gps_data->fix)
+				             {
+				                 // Mamy sygnał z satelitów!
+				                 snprintf(msg, sizeof(msg),
+				                          " UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f\r\n",
+				                          gps_data->hours, gps_data->minutes, gps_data->seconds,
+				                          gps_data->day,gps_data->month, gps_data->year,
+				                          gps_data->latitude, gps_data->longitude);
+				             }
+				             else
+				             {
+				                 // Brak fixa (np. w budynku), ale czas z satelitów lub RTC modułu może już płynąć
+				                 snprintf(msg, sizeof(msg),
+				                          "Finding satelites... UTC: %02d:%02d:%02d\r\n",
+				                          gps_data->hours, gps_data->minutes, gps_data->seconds);
+				             }
+
+
+				             HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+				         	 }
+				         }
+				     }
+
+		}
+
+void read_temp(uint8_t *Temperature_buf, HAL_StatusTypeDef *ret, int16_t *val,float *temp_c , uint8_t print){
+// Tell TMP102 that we want to read from the temperature register
+*Temperature_buf = REG_TEMP;
+*ret = HAL_I2C_Master_Transmit(&hi2c1, TMP102_ADDR, Temperature_buf, 1, 200);
+	if ( *ret != HAL_OK ) {
+	  strcpy(Temperature_buf, "Error Tx\r\n");
+	}
+	else{
+  // Read 2 bytes from the temperature register
+  *ret = HAL_I2C_Master_Receive(&hi2c1, TMP102_ADDR, Temperature_buf, 2, 200);
+	  if ( *ret != HAL_OK ) {
+		strcpy(Temperature_buf, "Error Rx\r\n");
+	  } else {
+
+		//Combine the bytes
+		*val = ((int16_t)*Temperature_buf << 4) | (*(Temperature_buf+1) >> 4);
+
+		// Convert to 2's complement, since temperature can be negative
+		if ( *val > 0x7FF ) {
+			*val |= 0xF000;
+		}
+
+		// Convert to float temperature value (Celsius)
+		*temp_c = *val * 0.0625;
+
+		// Convert temperature to decimal format
+		*temp_c *= 100;
+		sprintf((char*)Temperature_buf,"%u.%u C\r\n",
+			  ((unsigned int)*temp_c / 100),
+			  ((unsigned int)*temp_c % 100));
+	  }
+
+	}
+
+
+
+if (print){
+	HAL_UART_Transmit(&huart2, Temperature_buf, strlen((char*)Temperature_buf), 10);
+}
+
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -270,16 +412,17 @@ char retVal;
 
 // temperature
 HAL_StatusTypeDef ret; 	// to hold communication errors if such occur
-uint8_t buf[12]; 			// to hold the character string for UART communication or the bytes from the TMP102 chip
+uint8_t Temperature_buf[16]; 			// to hold the character string for UART communication or the bytes from the TMP102 chip
 int16_t val; 				// to hold raw value from the TMP102 chip
 float temp_c;
 
 //magnetometer
+float direction;
 int16_t magX;
 int16_t magY;
 int16_t magZ;
 
-char msg[1000];
+char msg[100];
 float degree_1;
 float degree_2;
 uint8_t read;
@@ -361,14 +504,17 @@ uint8_t read;
      HAL_Delay(20);
      spi_slave0_write(0x31, 0x08);// Write 0x08 to the magnetometer's CNTL2 register (0x31). This puts the magnetometer into Continuous Measurement Mode 4 (100 Hz update rate).
      HAL_Delay(20);
-     //write_spi(ICM20648_REG_BANK_SEL, 0x30);
-
-     //write_spi(ICM20648_REG_I2C_SLV0_CTRL, 0x89); //Write 0x89 to I2C_SLV0_CTRL (register 0x05). This tells the chip to automatically read 9 bytes starting from 0x11 (covering Status 1, X/Y/Z data, and Status 2).
-
      spi_slave0_read(0x10, 0x0A);
      HAL_Delay(20);
      write_spi(ICM20648_REG_BANK_SEL, 0x00);
 
+
+     for (int i=0; i<5; i++){
+    	 direction= direction + read_magnetometer(&magX, &magY, &magZ,  0);
+     }
+     direction = direction /5;
+     sprintf(msg, "direction %f\r\n", direction);
+     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
 
 
 
@@ -389,128 +535,12 @@ uint8_t read;
 
 
 	  // magnetometer
-
-
-	  	  write_spi(ICM20648_REG_BANK_SEL, 0x00); // Ensure Bank 0 is selected
-
-	  	  uint8_t st1;
-	  	  read_spi(&st1, 0x3B); // Read ST1 (Status 1) register
-
-	  	  // Check if the "Data Ready" bit (bit 0) is set to 1
-	  	  if (st1 & 0x01) {
-	  		  uint8_t hxl, hxh, hyl, hyh, hzl, hzh, st2;
-
-	  		  read_spi(&hxl, 0x3C); // X Low
-	  		  read_spi(&hxh, 0x3D); // X High
-	  		  read_spi(&hyl, 0x3E); // Y Low
-	  		  read_spi(&hyh, 0x3F); // Y High
-	  		  read_spi(&hzl, 0x40); // Z Low
-	  		  read_spi(&hzh, 0x41); // Z High
-
-	  		  // CRITICAL: You MUST read ST2 (0x42) at the end of every cycle.
-	  		  // If you do not read ST2, the AK09916 locks its data registers and stops updating!
-	  		  read_spi(&st2, 0x43);
-
-	  		  // Reconstruct the 16-bit values correctly (Little-Endian)
-	  		  magX = (int16_t)((hxh << 8) | hxl);
-	  		  magY = (int16_t)((hyh << 8) | hyl);
-	  		  magZ = (int16_t)((hzh << 8) | hzl);
-
-	  		  //sprintf(msg, "X:%hd Y:%hd Z:%hd\r\n", magX, magY, magZ);
-	  		  //HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-	  	  }
-
-
-			// cound directions in radians
-			float heading = atan2((float)magY, (float)magX);
-
-			// radians to angles
-			heading = heading * 180.0 / 3.14159265;
-
-			// Normalisation
-			if (heading < 0) {
-				heading += 360.0;
-			}
-			//sprintf(msg, "direction %f\r\n", heading);
-			//HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-			// heading = 0 (lub 360) oznacza Północ
-			// heading = 90 oznacza Wschód
-			// heading = 180 oznacza Południe
-			// heading = 270 oznacza Zachód
-
+	 direction = read_magnetometer(&magX, &magY, &magZ,  0);
 		 // gps
-		 if (line_ready)
-		     {
-		         line_ready = 0;
-
-		         // Parsujemy tylko gdy przyszła ramka $GNRMC lub $GPRMC
-		         if (strncmp(gps_line, "$GNRMC", 6) == 0 || strncmp(gps_line, "$GPRMC", 6) == 0)
-		         {
-		             GPS_Parse_RMC(gps_line, &gps_data);
-
-		             if (gps_data.fix)
-		             {
-		                 // Mamy sygnał z satelitów!
-		                 snprintf(msg, sizeof(msg),
-		                          " UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f\r\n",
-		                          gps_data.hours, gps_data.minutes, gps_data.seconds,
-		                          gps_data.day, gps_data.month, gps_data.year,
-		                          gps_data.latitude, gps_data.longitude);
-		             }
-		             else
-		             {
-		                 // Brak fixa (np. w budynku), ale czas z satelitów lub RTC modułu może już płynąć
-		                 snprintf(msg, sizeof(msg),
-		                          "Szukam satelitow... Czas UTC: %02d:%02d:%02d\r\n",
-		                          gps_data.hours, gps_data.minutes, gps_data.seconds);
-		             }
-
-		            // HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-		         }
-		     }
-
+	  read_gps(&line_ready, gps_line ,&gps_data, 0);
 
 		 // temperature
-
-		 // Tell TMP102 that we want to read from the temperature register
-		buf[0] = REG_TEMP;
-		ret = HAL_I2C_Master_Transmit(&hi2c1, TMP102_ADDR, buf, 1, 200);
-			if ( ret != HAL_OK ) {
-			  strcpy((char*)buf, "Error Tx\r\n");
-			}
-			else{
-		   // Read 2 bytes from the temperature register
-		   ret = HAL_I2C_Master_Receive(&hi2c1, TMP102_ADDR, buf, 2, 200);
-			  if ( ret != HAL_OK ) {
-				strcpy((char*)buf, "Error Rx\r\n");
-			  } else {
-
-				//Combine the bytes
-				val = ((int16_t)buf[0] << 4) | (buf[1] >> 4);
-
-				// Convert to 2's complement, since temperature can be negative
-				if ( val > 0x7FF ) {
-					val |= 0xF000;
-				}
-
-				// Convert to float temperature value (Celsius)
-				temp_c = val * 0.0625;
-
-				// Convert temperature to decimal format
-				temp_c *= 100;
-				sprintf((char*)buf,"%u.%u C\r\n",
-					  ((unsigned int)temp_c / 100),
-					  ((unsigned int)temp_c % 100));
-			  }
-
-			}
-
-
-
-
-	  HAL_UART_Transmit(&huart2, buf, strlen((char*)buf), 10);
-
-
+	  read_temp(Temperature_buf, &ret, &val,&temp_c,1);
 
     /* USER CODE END WHILE */
 
