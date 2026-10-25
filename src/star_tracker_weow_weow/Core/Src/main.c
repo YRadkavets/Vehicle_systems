@@ -344,7 +344,7 @@ float read_magnetometer(int16_t *magX,int16_t *magY,int16_t *magZ, uint8_t print
 
 
 
-uint8_t read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
+uint8_t read_gps(volatile uint8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
 		{
 		if (*line_ready)
 				     {
@@ -407,7 +407,7 @@ void reset(float *direction,GPS_Location_t *location,GPS_Data_t *gps_data ){
                 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
                     // Mamy sygnał z satelitów!
                     snprintf(msg, sizeof(msg),
-                             " Lat: %.6f, Lon: %.6f\r\n",
+                             "Lat:%.2f, Lon:%.2f\r\n",
 
                              gps_data->latitude, gps_data->longitude);
                 }
@@ -526,7 +526,7 @@ int main(void)
   // oled
   ssd1306_Init();
    ssd1306_SetCursor(0, 5);
-   retVal = ssd1306_WriteString(myText, Font_7x10, White);
+   retVal = ssd1306_WriteString(myText, Font_6x8, White);
    ssd1306_UpdateScreen();
 
   //servos
@@ -593,7 +593,7 @@ int main(void)
 	  // magnetometer
 	 //direction = read_magnetometer(&magX, &magY, &magZ,  0);
 	// gps
-	  read_gps(&line_ready, gps_line ,&gps_data, 0);
+	  read_gps(&line_ready, gps_line ,&gps_data, 1);
 
 
 

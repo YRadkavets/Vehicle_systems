@@ -7,45 +7,45 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
   1 .text         0000ed68  08000190  08000190  00001190  2**4
                   CONTENTS, ALLOC, LOAD, READONLY, CODE
-  2 .rodata       000013f8  0800eef8  0800eef8  0000fef8  2**3
+  2 .rodata       00000c80  0800eef8  0800eef8  0000fef8  2**3
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  3 .ARM.extab    00000000  080102f0  080102f0  00012238  2**0
+  3 .ARM.extab    00000000  0800fb78  0800fb78  00011238  2**0
                   CONTENTS, READONLY
-  4 .ARM          00000008  080102f0  080102f0  000112f0  2**2
+  4 .ARM          00000008  0800fb78  0800fb78  00010b78  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  5 .preinit_array 00000000  080102f8  080102f8  00012238  2**0
+  5 .preinit_array 00000000  0800fb80  0800fb80  00011238  2**0
                   CONTENTS, ALLOC, LOAD, DATA
-  6 .init_array   00000004  080102f8  080102f8  000112f8  2**2
+  6 .init_array   00000004  0800fb80  0800fb80  00010b80  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  7 .fini_array   00000004  080102fc  080102fc  000112fc  2**2
+  7 .fini_array   00000004  0800fb84  0800fb84  00010b84  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  8 .data         00000238  20000000  08010300  00012000  2**2
+  8 .data         00000238  20000000  0800fb88  00011000  2**2
                   CONTENTS, ALLOC, LOAD, DATA
-  9 .bss          00000870  20000238  08010538  00012238  2**3
+  9 .bss          00000870  20000238  0800fdc0  00011238  2**3
                   ALLOC
- 10 ._user_heap_stack 00000600  20000aa8  08010538  00012aa8  2**0
+ 10 ._user_heap_stack 00000600  20000aa8  0800fdc0  00011aa8  2**0
                   ALLOC
- 11 .ARM.attributes 00000030  00000000  00000000  00012238  2**0
+ 11 .ARM.attributes 00000030  00000000  00000000  00011238  2**0
                   CONTENTS, READONLY
- 12 .debug_info   0001cb2f  00000000  00000000  00012268  2**0
+ 12 .debug_info   0001cb06  00000000  00000000  00011268  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_abbrev 000037de  00000000  00000000  0002ed97  2**0
+ 13 .debug_abbrev 000037de  00000000  00000000  0002dd6e  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 14 .debug_aranges 00001a70  00000000  00000000  00032578  2**3
+ 14 .debug_aranges 00001a70  00000000  00000000  00031550  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 15 .debug_rnglists 000014c9  00000000  00000000  00033fe8  2**0
+ 15 .debug_rnglists 000014c9  00000000  00000000  00032fc0  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_macro  0002b796  00000000  00000000  000354b1  2**0
+ 16 .debug_macro  0002b796  00000000  00000000  00034489  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   0001f74a  00000000  00000000  00060c47  2**0
+ 17 .debug_line   0001f74a  00000000  00000000  0005fc1f  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0010f9f9  00000000  00000000  00080391  2**0
+ 18 .debug_str    0010f9f9  00000000  00000000  0007f369  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  0018fd8a  2**0
+ 19 .comment      00000043  00000000  00000000  0018ed62  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  000083ac  00000000  00000000  0018fdd0  2**2
+ 20 .debug_frame  000083ac  00000000  00000000  0018eda8  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_line_str 00000068  00000000  00000000  0019817c  2**0
+ 21 .debug_line_str 00000068  00000000  00000000  00197154  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -2331,7 +2331,7 @@ float read_magnetometer(int16_t *magX,int16_t *magY,int16_t *magZ, uint8_t print
 
 
 
-uint8_t read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
+uint8_t read_gps(volatile uint8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
 		{
  800179c:	b5f0      	push	{r4, r5, r6, r7, lr}
  800179e:	b0ad      	sub	sp, #180	@ 0xb4
@@ -2343,7 +2343,7 @@ uint8_t read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data
 		if (*line_ready)
  80017aa:	69fb      	ldr	r3, [r7, #28]
  80017ac:	781b      	ldrb	r3, [r3, #0]
- 80017ae:	b25b      	sxtb	r3, r3
+ 80017ae:	b2db      	uxtb	r3, r3
  80017b0:	2b00      	cmp	r3, #0
  80017b2:	d05e      	beq.n	8001872 <read_gps+0xd6>
 				     {
@@ -2732,7 +2732,7 @@ void reset(float *direction,GPS_Location_t *location,GPS_Data_t *gps_data ){
  8001a44:	20000604 	.word	0x20000604
  8001a48:	0800efa4 	.word	0x0800efa4
  8001a4c:	20000580 	.word	0x20000580
- 8001a50:	0800fe40 	.word	0x0800fe40
+ 8001a50:	0800f6d4 	.word	0x0800f6d4
  8001a54:	2000057d 	.word	0x2000057d
  8001a58:	0800efb8 	.word	0x0800efb8
  8001a5c:	200004f4 	.word	0x200004f4
@@ -3001,7 +3001,7 @@ int main(void)
  8001c26:	2105      	movs	r1, #5
  8001c28:	2000      	movs	r0, #0
  8001c2a:	f001 fa6f 	bl	800310c <ssd1306_SetCursor>
-   retVal = ssd1306_WriteString(myText, Font_7x10, White);
+   retVal = ssd1306_WriteString(myText, Font_6x8, White);
  8001c2e:	4b5b      	ldr	r3, [pc, #364]	@ (8001d9c <main+0x1b0>)
  8001c30:	2201      	movs	r2, #1
  8001c32:	9200      	str	r2, [sp, #0]
@@ -3174,8 +3174,8 @@ int main(void)
 	  // magnetometer
 	 //direction = read_magnetometer(&magX, &magY, &magZ,  0);
 	// gps
-	  read_gps(&line_ready, gps_line ,&gps_data, 0);
- 8001d66:	2300      	movs	r3, #0
+	  read_gps(&line_ready, gps_line ,&gps_data, 1);
+ 8001d66:	2301      	movs	r3, #1
  8001d68:	4a14      	ldr	r2, [pc, #80]	@ (8001dbc <main+0x1d0>)
  8001d6a:	491b      	ldr	r1, [pc, #108]	@ (8001dd8 <main+0x1ec>)
  8001d6c:	481b      	ldr	r0, [pc, #108]	@ (8001ddc <main+0x1f0>)
@@ -3209,7 +3209,7 @@ int main(void)
  8001d96:	f7ff fd7b 	bl	8001890 <reset>
 	  degree_1=read_potentiometer(&hadc1 );
  8001d9a:	e7c2      	b.n	8001d22 <main+0x136>
- 8001d9c:	0800fe4c 	.word	0x0800fe4c
+ 8001d9c:	0800f6d4 	.word	0x0800f6d4
  8001da0:	20000000 	.word	0x20000000
  8001da4:	2000057d 	.word	0x2000057d
  8001da8:	20000615 	.word	0x20000615
@@ -6060,7 +6060,7 @@ LoopForever:
   ldr r1, =_edata
  8002d1c:	20000238 	.word	0x20000238
   ldr r2, =_sidata
- 8002d20:	08010300 	.word	0x08010300
+ 8002d20:	0800fb88 	.word	0x0800fb88
   ldr r2, =_sbss
  8002d24:	20000238 	.word	0x20000238
   ldr r4, =_ebss
@@ -27259,8 +27259,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800a8fc:	f04f 0c01 	mov.w	ip, #1
  800a900:	e7f8      	b.n	800a8f4 <_strtod_l+0x27c>
  800a902:	bf00      	nop
- 800a904:	08010040 	.word	0x08010040
- 800a908:	0800fe58 	.word	0x0800fe58
+ 800a904:	0800f8c8 	.word	0x0800f8c8
+ 800a908:	0800f6e0 	.word	0x0800f6e0
  800a90c:	7ff00000 	.word	0x7ff00000
  800a910:	9b17      	ldr	r3, [sp, #92]	@ 0x5c
  800a912:	1c5a      	adds	r2, r3, #1
@@ -27555,13 +27555,13 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800ac02:	d0a9      	beq.n	800ab58 <_strtod_l+0x4e0>
  800ac04:	e7e3      	b.n	800abce <_strtod_l+0x556>
  800ac06:	bf00      	nop
- 800ac08:	0800fe67 	.word	0x0800fe67
- 800ac0c:	0801002c 	.word	0x0801002c
- 800ac10:	0800fe5f 	.word	0x0800fe5f
- 800ac14:	0800fe99 	.word	0x0800fe99
- 800ac18:	08010028 	.word	0x08010028
- 800ac1c:	080101b8 	.word	0x080101b8
- 800ac20:	08010190 	.word	0x08010190
+ 800ac08:	0800f6ef 	.word	0x0800f6ef
+ 800ac0c:	0800f8b4 	.word	0x0800f8b4
+ 800ac10:	0800f6e7 	.word	0x0800f6e7
+ 800ac14:	0800f721 	.word	0x0800f721
+ 800ac18:	0800f8b0 	.word	0x0800f8b0
+ 800ac1c:	0800fa40 	.word	0x0800fa40
+ 800ac20:	0800fa18 	.word	0x0800fa18
  800ac24:	7ff00000 	.word	0x7ff00000
  800ac28:	7ca00000 	.word	0x7ca00000
  800ac2c:	7fefffff 	.word	0x7fefffff
@@ -27761,7 +27761,7 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800ae0e:	d1db      	bne.n	800adc8 <_strtod_l+0x750>
  800ae10:	e6a9      	b.n	800ab66 <_strtod_l+0x4ee>
  800ae12:	bf00      	nop
- 800ae14:	08010058 	.word	0x08010058
+ 800ae14:	0800f8e0 	.word	0x0800f8e0
  800ae18:	fffffc02 	.word	0xfffffc02
  800ae1c:	2e00      	cmp	r6, #0
  800ae1e:	dd07      	ble.n	800ae30 <_strtod_l+0x7b8>
@@ -28260,7 +28260,7 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800b330:	d1f6      	bne.n	800b320 <_strtol_l.isra.0+0xd8>
  800b332:	f8c8 1000 	str.w	r1, [r8]
  800b336:	e794      	b.n	800b262 <_strtol_l.isra.0+0x1a>
- 800b338:	08010081 	.word	0x08010081
+ 800b338:	0800f909 	.word	0x0800f909
 
 0800b33c <strtol>:
  800b33c:	4613      	mov	r3, r2
@@ -28689,11 +28689,11 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800b750:	e7ee      	b.n	800b730 <_printf_float+0x2a0>
  800b752:	bf00      	nop
  800b754:	7fefffff 	.word	0x7fefffff
- 800b758:	0800fe5e 	.word	0x0800fe5e
- 800b75c:	0800fe5a 	.word	0x0800fe5a
- 800b760:	0800fe66 	.word	0x0800fe66
- 800b764:	0800fe62 	.word	0x0800fe62
- 800b768:	0800fe6a 	.word	0x0800fe6a
+ 800b758:	0800f6e6 	.word	0x0800f6e6
+ 800b75c:	0800f6e2 	.word	0x0800f6e2
+ 800b760:	0800f6ee 	.word	0x0800f6ee
+ 800b764:	0800f6ea 	.word	0x0800f6ea
+ 800b768:	0800f6f2 	.word	0x0800f6f2
  800b76c:	6da3      	ldr	r3, [r4, #88]	@ 0x58
  800b76e:	f8dd a028 	ldr.w	sl, [sp, #40]	@ 0x28
  800b772:	4553      	cmp	r3, sl
@@ -29176,8 +29176,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800bbf8:	f104 0619 	add.w	r6, r4, #25
  800bbfc:	e7f5      	b.n	800bbea <_printf_i+0x22e>
  800bbfe:	bf00      	nop
- 800bc00:	0800fe6c 	.word	0x0800fe6c
- 800bc04:	0800fe7d 	.word	0x0800fe7d
+ 800bc00:	0800f6f4 	.word	0x0800f6f4
+ 800bc04:	0800f705 	.word	0x0800f705
 
 0800bc08 <std>:
  800bc08:	2300      	movs	r3, #0
@@ -29632,10 +29632,10 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800bff2:	4798      	blx	r3
  800bff4:	3601      	adds	r6, #1
  800bff6:	e7f2      	b.n	800bfde <__libc_init_array+0x1e>
- 800bff8:	080102f8 	.word	0x080102f8
- 800bffc:	080102f8 	.word	0x080102f8
- 800c000:	080102f8 	.word	0x080102f8
- 800c004:	080102fc 	.word	0x080102fc
+ 800bff8:	0800fb80 	.word	0x0800fb80
+ 800bffc:	0800fb80 	.word	0x0800fb80
+ 800c000:	0800fb80 	.word	0x0800fb80
+ 800c004:	0800fb84 	.word	0x0800fb84
 
 0800c008 <__retarget_lock_init_recursive>:
  800c008:	4770      	bx	lr
@@ -30063,16 +30063,16 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800c42c:	3fc68a28 	.word	0x3fc68a28
  800c430:	509f79fb 	.word	0x509f79fb
  800c434:	3fd34413 	.word	0x3fd34413
- 800c438:	0800fea3 	.word	0x0800fea3
- 800c43c:	0800feba 	.word	0x0800feba
+ 800c438:	0800f72b 	.word	0x0800f72b
+ 800c43c:	0800f742 	.word	0x0800f742
  800c440:	7ff00000 	.word	0x7ff00000
- 800c444:	0800fe9f 	.word	0x0800fe9f
- 800c448:	0800fe96 	.word	0x0800fe96
- 800c44c:	0800fe6b 	.word	0x0800fe6b
- 800c450:	0800fe6a 	.word	0x0800fe6a
+ 800c444:	0800f727 	.word	0x0800f727
+ 800c448:	0800f71e 	.word	0x0800f71e
+ 800c44c:	0800f6f3 	.word	0x0800f6f3
+ 800c450:	0800f6f2 	.word	0x0800f6f2
  800c454:	3ff80000 	.word	0x3ff80000
- 800c458:	080101b8 	.word	0x080101b8
- 800c45c:	0800ff12 	.word	0x0800ff12
+ 800c458:	0800fa40 	.word	0x0800fa40
+ 800c45c:	0800f79a 	.word	0x0800f79a
  800c460:	f8d9 301c 	ldr.w	r3, [r9, #28]
  800c464:	9a00      	ldr	r2, [sp, #0]
  800c466:	601a      	str	r2, [r3, #0]
@@ -30321,8 +30321,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800c6f2:	4682      	mov	sl, r0
  800c6f4:	468b      	mov	fp, r1
  800c6f6:	e7c6      	b.n	800c686 <_dtoa_r+0x526>
- 800c6f8:	080101b8 	.word	0x080101b8
- 800c6fc:	08010190 	.word	0x08010190
+ 800c6f8:	0800fa40 	.word	0x0800fa40
+ 800c6fc:	0800fa18 	.word	0x0800fa18
  800c700:	3ff00000 	.word	0x3ff00000
  800c704:	40240000 	.word	0x40240000
  800c708:	401c0000 	.word	0x401c0000
@@ -30950,8 +30950,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800cd08:	f000 fcb4 	bl	800d674 <__multadd>
  800cd0c:	9001      	str	r0, [sp, #4]
  800cd0e:	e7ea      	b.n	800cce6 <_dtoa_r+0xb86>
- 800cd10:	0800ff12 	.word	0x0800ff12
- 800cd14:	0800fe96 	.word	0x0800fe96
+ 800cd10:	0800f79a 	.word	0x0800f79a
+ 800cd14:	0800f71e 	.word	0x0800f71e
 
 0800cd18 <_free_r>:
  800cd18:	b538      	push	{r3, r4, r5, lr}
@@ -31391,9 +31391,9 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d126:	2b00      	cmp	r3, #0
  800d128:	d1dd      	bne.n	800d0e6 <__gethex+0x26a>
  800d12a:	e7ee      	b.n	800d10a <__gethex+0x28e>
- 800d12c:	0800fe58 	.word	0x0800fe58
- 800d130:	0800ff12 	.word	0x0800ff12
- 800d134:	0800ff23 	.word	0x0800ff23
+ 800d12c:	0800f6e0 	.word	0x0800f6e0
+ 800d130:	0800f79a 	.word	0x0800f79a
+ 800d134:	0800f7ab 	.word	0x0800f7ab
  800d138:	1e6f      	subs	r7, r5, #1
  800d13a:	f1b9 0f00 	cmp.w	r9, #0
  800d13e:	d130      	bne.n	800d1a2 <__gethex+0x326>
@@ -31528,7 +31528,7 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d292:	42b0      	cmp	r0, r6
  800d294:	dbe7      	blt.n	800d266 <__gethex+0x3ea>
  800d296:	e7f0      	b.n	800d27a <__gethex+0x3fe>
- 800d298:	0800ff12 	.word	0x0800ff12
+ 800d298:	0800f79a 	.word	0x0800f79a
 
 0800d29c <L_shift>:
  800d29c:	f1c2 0208 	rsb	r2, r2, #8
@@ -31927,8 +31927,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d620:	d0e9      	beq.n	800d5f6 <_Balloc+0x42>
  800d622:	e9c0 6401 	strd	r6, r4, [r0, #4]
  800d626:	e7ee      	b.n	800d606 <_Balloc+0x52>
- 800d628:	0800fea3 	.word	0x0800fea3
- 800d62c:	0800ff83 	.word	0x0800ff83
+ 800d628:	0800f72b 	.word	0x0800f72b
+ 800d62c:	0800f80b 	.word	0x0800f80b
 
 0800d630 <_Bfree>:
  800d630:	b570      	push	{r4, r5, r6, lr}
@@ -31956,8 +31956,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d664:	6021      	str	r1, [r4, #0]
  800d666:	f843 4022 	str.w	r4, [r3, r2, lsl #2]
  800d66a:	bd70      	pop	{r4, r5, r6, pc}
- 800d66c:	0800fea3 	.word	0x0800fea3
- 800d670:	0800ff83 	.word	0x0800ff83
+ 800d66c:	0800f72b 	.word	0x0800f72b
+ 800d670:	0800f80b 	.word	0x0800f80b
 
 0800d674 <__multadd>:
  800d674:	e92d 41f0 	stmdb	sp!, {r4, r5, r6, r7, r8, lr}
@@ -32011,8 +32011,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d6f0:	6125      	str	r5, [r4, #16]
  800d6f2:	4620      	mov	r0, r4
  800d6f4:	e8bd 81f0 	ldmia.w	sp!, {r4, r5, r6, r7, r8, pc}
- 800d6f8:	0800ff12 	.word	0x0800ff12
- 800d6fc:	0800ff83 	.word	0x0800ff83
+ 800d6f8:	0800f79a 	.word	0x0800f79a
+ 800d6fc:	0800f80b 	.word	0x0800f80b
 
 0800d700 <__s2b>:
  800d700:	e92d 43f8 	stmdb	sp!, {r3, r4, r5, r6, r7, r8, r9, lr}
@@ -32073,8 +32073,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d784:	f7ff ff76 	bl	800d674 <__multadd>
  800d788:	e7ee      	b.n	800d768 <__s2b+0x68>
  800d78a:	bf00      	nop
- 800d78c:	0800ff12 	.word	0x0800ff12
- 800d790:	0800ff83 	.word	0x0800ff83
+ 800d78c:	0800f79a 	.word	0x0800f79a
+ 800d790:	0800f80b 	.word	0x0800f80b
 
 0800d794 <__hi0bits>:
  800d794:	f5b0 3f80 	cmp.w	r0, #65536	@ 0x10000
@@ -32164,8 +32164,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d84a:	6103      	str	r3, [r0, #16]
  800d84c:	bd10      	pop	{r4, pc}
  800d84e:	bf00      	nop
- 800d850:	0800ff12 	.word	0x0800ff12
- 800d854:	0800ff83 	.word	0x0800ff83
+ 800d850:	0800f79a 	.word	0x0800f79a
+ 800d854:	0800f80b 	.word	0x0800f80b
 
 0800d858 <__multiply>:
  800d858:	e92d 4ff0 	stmdb	sp!, {r4, r5, r6, r7, r8, r9, sl, fp, lr}
@@ -32286,8 +32286,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800d99e:	3e01      	subs	r6, #1
  800d9a0:	e799      	b.n	800d8d6 <__multiply+0x7e>
  800d9a2:	bf00      	nop
- 800d9a4:	0800ff12 	.word	0x0800ff12
- 800d9a8:	0800ff83 	.word	0x0800ff83
+ 800d9a4:	0800f79a 	.word	0x0800f79a
+ 800d9a8:	0800f80b 	.word	0x0800f80b
 
 0800d9ac <__pow5mult>:
  800d9ac:	e92d 43f8 	stmdb	sp!, {r3, r4, r5, r6, r7, r8, r9, lr}
@@ -32357,9 +32357,9 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800da50:	4628      	mov	r0, r5
  800da52:	e8bd 83f8 	ldmia.w	sp!, {r3, r4, r5, r6, r7, r8, r9, pc}
  800da56:	bf00      	nop
- 800da58:	08010184 	.word	0x08010184
- 800da5c:	0800fea3 	.word	0x0800fea3
- 800da60:	0800ff83 	.word	0x0800ff83
+ 800da58:	0800fa0c 	.word	0x0800fa0c
+ 800da5c:	0800f72b 	.word	0x0800f72b
+ 800da60:	0800f80b 	.word	0x0800f80b
 
 0800da64 <__lshift>:
  800da64:	e92d 4ff8 	stmdb	sp!, {r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}
@@ -32439,8 +32439,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800db32:	d8f8      	bhi.n	800db26 <__lshift+0xc2>
  800db34:	e7e9      	b.n	800db0a <__lshift+0xa6>
  800db36:	bf00      	nop
- 800db38:	0800ff12 	.word	0x0800ff12
- 800db3c:	0800ff83 	.word	0x0800ff83
+ 800db38:	0800f79a 	.word	0x0800f79a
+ 800db3c:	0800f80b 	.word	0x0800f80b
 
 0800db40 <__mcmp>:
  800db40:	690a      	ldr	r2, [r1, #16]
@@ -32577,8 +32577,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800dc9a:	e7da      	b.n	800dc52 <__mdiff+0xda>
  800dc9c:	3f01      	subs	r7, #1
  800dc9e:	e7e6      	b.n	800dc6e <__mdiff+0xf6>
- 800dca0:	0800ff12 	.word	0x0800ff12
- 800dca4:	0800ff83 	.word	0x0800ff83
+ 800dca0:	0800f79a 	.word	0x0800f79a
+ 800dca4:	0800f80b 	.word	0x0800f80b
 
 0800dca8 <__ulp>:
  800dca8:	b082      	sub	sp, #8
@@ -32729,8 +32729,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800de26:	f7ff fcb5 	bl	800d794 <__hi0bits>
  800de2a:	ebc0 1042 	rsb	r0, r0, r2, lsl #5
  800de2e:	e7e5      	b.n	800ddfc <__d2b+0x74>
- 800de30:	0800ff12 	.word	0x0800ff12
- 800de34:	0800ff83 	.word	0x0800ff83
+ 800de30:	0800f79a 	.word	0x0800f79a
+ 800de34:	0800f80b 	.word	0x0800f80b
 
 0800de38 <__ratio>:
  800de38:	e92d 4ff0 	stmdb	sp!, {r4, r5, r6, r7, r8, r9, sl, fp, lr}
@@ -33121,11 +33121,11 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800e1d4:	f7fd fbf2 	bl	800b9bc <_printf_i>
  800e1d8:	e7ee      	b.n	800e1b8 <_svfiprintf_r+0x1b8>
  800e1da:	bf00      	nop
- 800e1dc:	0800ffdc 	.word	0x0800ffdc
- 800e1e0:	0800ffe6 	.word	0x0800ffe6
+ 800e1dc:	0800f864 	.word	0x0800f864
+ 800e1e0:	0800f86e 	.word	0x0800f86e
  800e1e4:	0800b491 	.word	0x0800b491
  800e1e8:	0800df3f 	.word	0x0800df3f
- 800e1ec:	0800ffe2 	.word	0x0800ffe2
+ 800e1ec:	0800f86a 	.word	0x0800f86a
 
 0800e1f0 <__sflush_r>:
  800e1f0:	f9b1 200c 	ldrsh.w	r2, [r1, #12]
@@ -33342,9 +33342,9 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800e3c0:	e7f3      	b.n	800e3aa <__assert_func+0x12>
  800e3c2:	bf00      	nop
  800e3c4:	200001e8 	.word	0x200001e8
- 800e3c8:	0800ffed 	.word	0x0800ffed
- 800e3cc:	0800fffa 	.word	0x0800fffa
- 800e3d0:	08010028 	.word	0x08010028
+ 800e3c8:	0800f875 	.word	0x0800f875
+ 800e3cc:	0800f882 	.word	0x0800f882
+ 800e3d0:	0800f8b0 	.word	0x0800f8b0
 
 0800e3d4 <_calloc_r>:
  800e3d4:	b570      	push	{r4, r5, r6, lr}
@@ -33697,11 +33697,11 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800e6f8:	f7fd f960 	bl	800b9bc <_printf_i>
  800e6fc:	e7e5      	b.n	800e6ca <_vfiprintf_r+0x1de>
  800e6fe:	bf00      	nop
- 800e700:	0800ffdc 	.word	0x0800ffdc
- 800e704:	0800ffe6 	.word	0x0800ffe6
+ 800e700:	0800f864 	.word	0x0800f864
+ 800e704:	0800f86e 	.word	0x0800f86e
  800e708:	0800b491 	.word	0x0800b491
  800e70c:	0800e4c9 	.word	0x0800e4c9
- 800e710:	0800ffe2 	.word	0x0800ffe2
+ 800e710:	0800f86a 	.word	0x0800f86a
 
 0800e714 <__swbuf_r>:
  800e714:	b5f8      	push	{r3, r4, r5, r6, r7, lr}
@@ -34158,8 +34158,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800eb60:	54442d18 	.word	0x54442d18
  800eb64:	3fe921fb 	.word	0x3fe921fb
  800eb68:	7ff00000 	.word	0x7ff00000
- 800eb6c:	08010280 	.word	0x08010280
- 800eb70:	08010298 	.word	0x08010298
+ 800eb6c:	0800fb08 	.word	0x0800fb08
+ 800eb70:	0800fb20 	.word	0x0800fb20
  800eb74:	00000000 	.word	0x00000000
 
 0800eb78 <atan>:
@@ -34449,8 +34449,8 @@ __weak void HAL_UARTEx_WakeupCallback(UART_HandleTypeDef *huart)
  800eea8:	440fffff 	.word	0x440fffff
  800eeac:	7ff00000 	.word	0x7ff00000
  800eeb0:	3fdbffff 	.word	0x3fdbffff
- 800eeb4:	080102b0 	.word	0x080102b0
- 800eeb8:	080102d0 	.word	0x080102d0
+ 800eeb4:	0800fb38 	.word	0x0800fb38
+ 800eeb8:	0800fb58 	.word	0x0800fb58
  800eebc:	3ff00000 	.word	0x3ff00000
  800eec0:	3ff2ffff 	.word	0x3ff2ffff
  800eec4:	40038000 	.word	0x40038000
