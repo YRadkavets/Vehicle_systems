@@ -27,17 +27,20 @@
 #include <ssd1306.h>
 #include <ssd1306_fonts.h>
 #include <stdlib.h>
-
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+enum mode {MANUAL, FOLLOW};
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define BUTTON_RESET GPIO_PIN_12
+#define BUTTON_MODE GPIO_PIN_13
+#define DEG_TO_RAD (M_PI / 180.0)
+#define RAD_TO_DEG (180.0 / M_PI)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -60,10 +63,14 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+// modes
+
+int mode = MANUAL;
+
 //button flags
 
-uint8_t reset_flag=0;
-
+volatile uint8_t reset_flag=0;
+volatile uint8_t mode_flag=0;
 
 //oled
 char myText[100] = ":(";
@@ -212,7 +219,175 @@ void GPS_Parse_RMC(char *line, GPS_Data_t *gps)
     }
 }
 
+//coordinates
 
+// Structure holding equatorial coordinates of the celestial target
+typedef struct {
+    float ra_hours;    // Right Ascension in decimal hours (0.0 to 24.0 h)
+    float dec_deg;     // Declination in decimal degrees (-90.0 to +90.0 deg)
+} SkyTarget_t;
+
+// Structure holding calculated angles for the servos
+typedef struct {
+    float azimuth_servo;   // Horizontal servo angle (0 to 180 or 0 to 360 deg)
+    float altitude_servo;  // Vertical servo angle (0 to 90 deg)
+} ServoAngles_t;
+
+/**
+ * @brief Normalizes an angle in degrees into the [0, 360) range.
+ */
+static float normalize_deg(float angle) {
+    angle = fmodf(angle, 360.0f);
+    if (angle < 0.0f) angle += 360.0f;
+    return angle;
+}
+
+/**
+ * @brief Computes days elapsed since the standard epoch J2000.0 (d = JD - 2451545.0).
+ *
+ * @param year   Calendar year (e.g., 2026)
+ * @param month  Month (1 - 12)
+ * @param day    Day of the month (1 - 31)
+ * @param hour   UTC hour (0 - 23)
+ * @param minute UTC minute (0 - 59)
+ * @param second UTC second (0 - 59)
+ * @return Days elapsed since J2000.0 epoch
+ */
+static double get_days_since_j2000(int year, int month, int day, int hour, int minute, int second) {
+    if (month <= 2) {
+        year -= 1;
+        month += 12;
+    }
+
+    int A = year / 100;
+    int B = 2 - A + (A / 4);
+
+    // Julian Day Number at 0h UTC
+    double JD = floor(365.25 * (year + 4716)) + floor(30.6001 * (month + 1)) + day + B - 1524.5;
+
+    // Add fractional day based on UTC time
+    double day_fraction = (hour + minute / 60.0 + second / 3600.0) / 24.0;
+    JD += day_fraction;
+
+    return JD - 2451545.0; // Elapsed days since J2000.0
+}
+
+/**
+ * @brief Computes Greenwich Mean Sidereal Time (GMST) in degrees [0, 360).
+ *
+ * @param d Days elapsed since J2000.0
+ * @param hour UTC hour
+ * @param minute UTC minute
+ * @param second UTC second
+ * @return GMST in degrees
+ */
+static float calculate_gmst_deg(double d, int hour, int minute, int second) {
+    // Astronomical approximation formula for GMST
+    double gmst = 280.46061837 + 360.98564736629 * d;
+    return (float)fmod(gmst, 360.0);
+}
+
+/**
+ * @brief Converts equatorial coordinates into horizontal servo angles.
+ *
+ * @param target     Target celestial coordinates (RA in hours, Dec in degrees)
+ * @param gps        Current GPS data (latitude, longitude, UTC date & time)
+ * @param heading    Device orientation heading (0=N, 90=W, 180=S, 270=E)
+ * @param servos     Pointer to output struct containing computed servo angles
+ */
+void Calculate_Servo_Positions(const SkyTarget_t *target,
+                              const GPS_Data_t *gps,
+                              float heading,
+                              ServoAngles_t *servos)
+{
+    // 1. Calculate elapsed days since J2000.0
+    double d = get_days_since_j2000(gps->year, gps->month, gps->day,
+                                    gps->hours, gps->minutes, gps->seconds);
+
+    // 2. Calculate Greenwich Mean Sidereal Time (GMST) in degrees
+    float gmst = calculate_gmst_deg(d, gps->hours, gps->minutes, gps->seconds);
+    if (gmst < 0.0f) gmst += 360.0f;
+
+    // 3. Calculate Local Sidereal Time (LST)
+    // Positive longitude for East, negative for West
+    float lst = normalize_deg(gmst + (float)gps->longitude);
+
+    // 4. Calculate Hour Angle (HA)
+    // 1 hour of Right Ascension = 15 degrees
+    float ra_deg = target->ra_hours * 15.0f;
+    float ha_deg = normalize_deg(lst - ra_deg);
+
+    // Convert angles to radians for trigonometric functions
+    float ha = ha_deg * DEG_TO_RAD;
+    float dec = target->dec_deg * DEG_TO_RAD;
+    float lat = (float)gps->latitude * DEG_TO_RAD;
+
+    // 5. Calculate Altitude (Alt)
+    // sin(Alt) = sin(Dec)*sin(Lat) + cos(Dec)*cos(Lat)*cos(HA)
+    float sin_alt = sinf(dec) * sinf(lat) + cosf(dec) * cosf(lat) * cosf(ha);
+
+    // Clamp to valid range [-1.0, 1.0] to prevent rounding NaN errors
+    if (sin_alt > 1.0f) sin_alt = 1.0f;
+    if (sin_alt < -1.0f) sin_alt = -1.0f;
+    float alt = asinf(sin_alt); // Altitude in radians
+
+    // 6. Calculate astronomical Azimuth (Az: 0=N, 90=E, 180=S, 270=W)
+    // cos(Az) = (sin(Dec) - sin(Alt)*sin(Lat)) / (cos(Alt)*cos(Lat))
+    float cos_az = (sinf(dec) - sinf(alt) * sinf(lat)) / (cosf(alt) * cosf(lat));
+    if (cos_az > 1.0f) cos_az = 1.0f;
+    if (cos_az < -1.0f) cos_az = -1.0f;
+
+    float az = acosf(cos_az) * RAD_TO_DEG;
+
+    // If sin(HA) > 0, the target is setting (past the meridian, Az > 180 deg)
+    if (sinf(ha) > 0.0f) {
+        az = 360.0f - az;
+    }
+
+    float alt_deg = alt * RAD_TO_DEG;
+
+    // -------------------------------------------------------------
+    // 7. Map to physical servo angles
+    // -------------------------------------------------------------
+
+    // Vertical servo (Altitude):
+    // If target is below horizon (Alt < 0), clamp servo to 0 deg
+    if (alt_deg < 0.0f) {
+        servos->altitude_servo = 0.0f; // Below horizon
+    } else {
+        servos->altitude_servo = alt_deg;
+    }
+
+    // Horizontal servo (Relative Azimuth):
+    // Standard astronomical azimuth: 0=N, 90=E, 180=S, 270=W
+    // User heading convention is counter-clockwise: 0=N, 90=W, 180=S, 270=E
+    // Transform target azimuth to user compass system: target_in_user_system = (360 - az)
+    // Relative servo position: target - device_heading
+    float target_in_your_system = 360.0f - az;
+    float relative_servo_azimuth = target_in_your_system - heading;
+
+    servos->azimuth_servo = normalize_deg(relative_servo_azimuth);
+}
+
+/**
+ * @brief Sets standard RC servo angle (0 to 180 degrees via 1000us - 2000us PWM pulse).
+ *
+ * @param htim    Pointer to TIM handle (e.g., &htim2)
+ * @param channel Timer channel (e.g., TIM_CHANNEL_1)
+ * @param angle   Target angle in degrees (0.0 to 180.0)
+ */
+void Servo_SetAngle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
+{
+    // Clamp angle to physical servo limits
+    if (angle < 0.0f) angle = 0.0f;
+    if (angle > 180.0f) angle = 180.0f;
+
+    // Map 0 - 180 degrees to 1000 - 2000 microseconds pulse width
+    uint32_t pulse_us = (uint32_t)(1000.0f + (angle / 180.0f) * 1000.0f);
+
+    // Update timer compare register
+    __HAL_TIM_SET_COMPARE(htim, channel, pulse_us);
+}
 
 /* USER CODE END PV */
 
@@ -343,48 +518,48 @@ float read_magnetometer(int16_t *magX,int16_t *magY,int16_t *magZ, uint8_t print
 
 
 
+uint8_t read_gps(volatile uint8_t *line_ready, char *gps_line, GPS_Data_t *gps_data, uint8_t print)
+{
+    if (*line_ready)
+    {
+        *line_ready = 0;
 
-uint8_t read_gps(volatile uint8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
-		{
-		if (*line_ready)
-				     {
-				         *line_ready = 0;
+        // Parse only if sentence is $GNRMC or $GPRMC
+        if (strncmp(gps_line, "$GNRMC", 6) == 0 || strncmp(gps_line, "$GPRMC", 6) == 0)
+        {
+            GPS_Parse_RMC(gps_line, gps_data);
 
-				         // Parsujemy tylko gdy przyszła ramka $GNRMC lub $GPRMC
-				         if (strncmp(gps_line, "$GNRMC", 6) == 0 || strncmp(gps_line, "$GPRMC", 6) == 0)
-				         {
-				             GPS_Parse_RMC(gps_line, gps_data);
-				         if (print){
-				        	 char msg[100];
-				             if (gps_data->fix)
-				             {
-				                 // Mamy sygnał z satelitów!
-				                 snprintf(msg, sizeof(msg),
-				                          " UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f\r\n",
-				                          gps_data->hours, gps_data->minutes, gps_data->seconds,
-				                          gps_data->day,gps_data->month, gps_data->year,
-				                          gps_data->latitude, gps_data->longitude);
-				                 return 1;
-				             }
-				             else
-				             {
-				                 // Brak fixa (np. w budynku), ale czas z satelitów lub RTC modułu może już płynąć
-				                 snprintf(msg, sizeof(msg),
-				                          "Finding satelites... UTC: %02d:%02d:%02d\r\n",
-				                          gps_data->hours, gps_data->minutes, gps_data->seconds);
-				                 return 0;
-				             }
+            if (print)
+            {
+                char msg[128]; // Increased to 128 to prevent truncation
 
+                if (gps_data->fix)
+                {
+                    snprintf(msg, sizeof(msg),
+                             " UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f\r\n",
+                             gps_data->hours, gps_data->minutes, gps_data->seconds,
+                             gps_data->day, gps_data->month, gps_data->year,
+                             gps_data->latitude, gps_data->longitude);
+                }
+                else
+                {
+                    snprintf(msg, sizeof(msg),
+                             "Finding satelites... UTC: %02d:%02d:%02d\r\n",
+                             gps_data->hours, gps_data->minutes, gps_data->seconds);
+                }
 
-				             HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
-				         	 }
-				         }
-				     }else{
-				    	 return 2;
-				     }
+                // Transmit FIRST, then return!
+                HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+            }
 
-		}
+            return gps_data->fix ? 1 : 0;
+        }
 
+        return 3; // Line was processed, but it was not RMC (e.g. GGA, GSV)
+    }
+
+    return 2; // No line ready yet
+}
 
 void reset(float *direction,GPS_Location_t *location,GPS_Data_t *gps_data ){
 
@@ -572,9 +747,19 @@ int main(void)
 
      reset(&direction,&location,&gps_data);
 
+     SkyTarget_t plejady = {
 
 
+    		 .ra_hours = 3.79f,
+    		 .dec_deg  = 24.716f
+     };
 
+     ServoAngles_t target_servos;
+     uint32_t last_calc_time = 0;
+
+
+     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 1500);
+     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 1500);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -582,32 +767,73 @@ int main(void)
 
   while (1)
   {
+	  if (mode==MANUAL){
 	  //servos
 	  degree_1=read_potentiometer(&hadc1 );
 	  degree_2=read_potentiometer(&hadc2 );
 	  servo_control(&htim2,TIM_CHANNEL_3,degree_2);
 	  servo_control(&htim3,TIM_CHANNEL_2,degree_1);
-	  //sprintf(msg,"%f\r\n", degree_2);
+	  }else{
+		  // Obliczaj nową pozycję serw np. co 1 sekundę, gdy GPS ma poprawny czas i pozycję
+		      if (gps_data.fix && (HAL_GetTick() - last_calc_time > 1000))
+		      {
+		          last_calc_time = HAL_GetTick();
+
+		          // Wylicz kąty serw
+		          Calculate_Servo_Positions(&plejady, &gps_data, direction, &target_servos);
+
+		          // Ustaw serwo wysokości (0 do 90 stopni)
+		          servo_control(&htim2,TIM_CHANNEL_3,target_servos.altitude_servo);
+
+		          // Ustaw serwo azymutu
+		          // Uwaga: standardowe serwa obracają się w zakresie 0-180 stopni.
+		          // Jeśli serwo obraca się tylko o 180 st., dopasuj zakres:
+		          if (target_servos.azimuth_servo <= 170.0f) {
+		        	  servo_control(&htim3,TIM_CHANNEL_2,target_servos.azimuth_servo);
+
+		          }else{
+		        	  servo_control(&htim3,TIM_CHANNEL_2,170);
+		          }
+
+		          // Podgląd na UART
+		          char dbg[96];
+		          snprintf(dbg, sizeof(dbg), "Cel -> Alt: %.1f st. | Servo Az: %.1f st.\r\n",
+		                   target_servos.altitude_servo, target_servos.azimuth_servo);
+		          HAL_UART_Transmit(&huart2, (uint8_t*)dbg, strlen(dbg), 50);
+		      }
+	  }
 
 
-	  // magnetometer
-	 //direction = read_magnetometer(&magX, &magY, &magZ,  0);
 	// gps
 	  read_gps(&line_ready, gps_line ,&gps_data, 1);
 
-
-
-		 // temperature
+	// temperature
 	  read_temp(Temperature_buf, &ret, &val,&temp_c,0);
 
 	  if (reset_flag){
 		  reset_flag=0;
 		  reset(&direction,&location,&gps_data);
-
-
-
-
 	  }
+
+	  if (mode_flag ){
+		  mode_flag =0;
+		  ssd1306_SetCursor(0, 5);
+		  if (mode == FOLLOW){snprintf(msg, sizeof(msg),"FOLLOW");}
+		  else{snprintf(msg, sizeof(msg),"MANUAL");}
+
+		  retVal = ssd1306_WriteString(msg, Font_6x8, White);
+		  ssd1306_UpdateScreen();
+	  }
+
+	  if (temp_c< 2500){
+		  ssd1306_SetCursor(100, 0);
+		  snprintf(msg, sizeof(msg),"cold");
+		  retVal = ssd1306_WriteString(msg, Font_6x8, White);
+		  ssd1306_UpdateScreen();
+	  }else{ssd1306_SetCursor(100, 0);
+	  snprintf(msg, sizeof(msg),"    ");
+	  retVal = ssd1306_WriteString(msg, Font_6x8, White);
+	  ssd1306_UpdateScreen();}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1091,8 +1317,14 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PB11 PB12 PB14 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_14;
+  /*Configure GPIO pin : PC13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -1118,6 +1350,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if(GPIO_Pin == BUTTON_RESET) {
 	    reset_flag = 1;
+  }else if (GPIO_Pin == BUTTON_MODE)
+  	{
+	  mode_flag = 1;
+	  if (mode == MANUAL){
+		  mode = FOLLOW;
+  }else{
+	  mode = MANUAL;}
   }
 }
 
