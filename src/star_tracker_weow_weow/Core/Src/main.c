@@ -26,6 +26,8 @@
 #include <math.h>
 #include <ssd1306.h>
 #include <ssd1306_fonts.h>
+#include <stdlib.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,7 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BUTTON_RESET GPIO_PIN_12
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,13 +60,37 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+//button flags
 
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
+uint8_t reset_flag=0;
+
+
+//oled
+char myText[100] = ":(";
+char retVal;
+char msg[100];
+
+
 //temperature
 static const uint8_t TMP102_ADDR = 0x48 << 1; // Use 8-bit address
 static const uint8_t REG_TEMP = 0x00;
+HAL_StatusTypeDef ret; 	// to hold communication errors if such occur
+uint8_t Temperature_buf[16]; 			// to hold the character string for UART communication or the bytes from the TMP102 chip
+int16_t val; 				// to hold raw value from the TMP102 chip
+float temp_c;
+
+//magnetometer
+float direction;
+float base_direction;
+int16_t magX;
+int16_t magY;
+int16_t magZ;
+
+
+float degree_1;
+float degree_2;
+uint8_t read;
+
 
 //GPS
 uint8_t rx_byte;
@@ -85,7 +111,13 @@ typedef struct {
     double longitude;     // Stopnie dziesiętne (np. 21.012220)
 } GPS_Data_t;
 
+typedef struct {
+    double latitude;      // Stopnie dziesiętne (np. 52.229770)
+    double longitude;     // Stopnie dziesiętne (np. 21.012220)
+} GPS_Location_t;
+
 GPS_Data_t gps_data = {0};
+GPS_Location_t location ={0};
 
 // Konwersja formatu NMEA (DDMM.MMMM) na stopnie dziesiętne (DD.DDDDDD)
 double NMEA_To_Decimal(double nmea_val, char quadrant)
@@ -211,6 +243,8 @@ float read_potentiometer(ADC_HandleTypeDef *hadc ){
 
 }
 
+
+
 void write_spi(uint8_t REG_ADRES, uint8_t msg){
 	 uint8_t DATA[2];
 	 DATA[0]= writeMask | REG_ADRES ;
@@ -310,7 +344,7 @@ float read_magnetometer(int16_t *magX,int16_t *magY,int16_t *magZ, uint8_t print
 
 
 
-void read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
+uint8_t read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, uint8_t print)
 		{
 		if (*line_ready)
 				     {
@@ -330,6 +364,7 @@ void read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, u
 				                          gps_data->hours, gps_data->minutes, gps_data->seconds,
 				                          gps_data->day,gps_data->month, gps_data->year,
 				                          gps_data->latitude, gps_data->longitude);
+				                 return 1;
 				             }
 				             else
 				             {
@@ -337,15 +372,63 @@ void read_gps(volatile int8_t *line_ready,char *gps_line,GPS_Data_t *gps_data, u
 				                 snprintf(msg, sizeof(msg),
 				                          "Finding satelites... UTC: %02d:%02d:%02d\r\n",
 				                          gps_data->hours, gps_data->minutes, gps_data->seconds);
+				                 return 0;
 				             }
 
 
 				             HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
 				         	 }
 				         }
+				     }else{
+				    	 return 2;
 				     }
 
 		}
+
+
+void reset(float *direction,GPS_Location_t *location,GPS_Data_t *gps_data ){
+
+	float sum = 0.0f;
+	for (int i = 0; i < 10; i++) {
+	    sum += read_magnetometer(&magX, &magY, &magZ, 0);
+	}
+	*direction = sum / 10.0f;
+    sprintf(msg, "direction %.1f\r\n", *direction);
+    ssd1306_SetCursor(0, 5);
+    retVal = ssd1306_WriteString(msg, Font_6x8, White);
+
+
+    if (gps_data->fix)
+                {snprintf(msg, sizeof(msg),
+                        "UTC: %02d:%02d:%02d | Data: %02d.%02d.%04d | Lat: %.6f, Lon: %.6f | direction %.1f\r\n",
+                        gps_data->hours, gps_data->minutes, gps_data->seconds,
+                        gps_data->day, gps_data->month, gps_data->year,
+                        gps_data->latitude, gps_data->longitude,*direction);
+                HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+                    // Mamy sygnał z satelitów!
+                    snprintf(msg, sizeof(msg),
+                             " Lat: %.6f, Lon: %.6f\r\n",
+
+                             gps_data->latitude, gps_data->longitude);
+                }
+                else
+                {
+                    // Brak fixa (np. w budynku), ale czas z satelitów lub RTC modułu może już płynąć
+                	snprintf(msg, sizeof(msg),
+                	                         "Finding satelites...  UTC: %02d:%02d:%02d | direction %.1f \r\n",
+                	                         gps_data->hours, gps_data->minutes, gps_data->seconds,*direction);
+                	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+
+                    snprintf(msg, sizeof(msg),
+                             "No satelites");
+                }
+    ssd1306_SetCursor(0, 15);
+    retVal = ssd1306_WriteString(msg, Font_6x8, White);
+    ssd1306_UpdateScreen();
+
+
+
+}
 
 void read_temp(uint8_t *Temperature_buf, HAL_StatusTypeDef *ret, int16_t *val,float *temp_c , uint8_t print){
 // Tell TMP102 that we want to read from the temperature register
@@ -405,28 +488,6 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-//oled
-char myText[] = ":(";
-char retVal;
-
-
-// temperature
-HAL_StatusTypeDef ret; 	// to hold communication errors if such occur
-uint8_t Temperature_buf[16]; 			// to hold the character string for UART communication or the bytes from the TMP102 chip
-int16_t val; 				// to hold raw value from the TMP102 chip
-float temp_c;
-
-//magnetometer
-float direction;
-int16_t magX;
-int16_t magY;
-int16_t magZ;
-
-char msg[100];
-float degree_1;
-float degree_2;
-uint8_t read;
-
 
 
   /* USER CODE END 1 */
@@ -465,7 +526,7 @@ uint8_t read;
   // oled
   ssd1306_Init();
    ssd1306_SetCursor(0, 5);
-   retVal = ssd1306_WriteString(myText, Font_16x26, White);
+   retVal = ssd1306_WriteString(myText, Font_7x10, White);
    ssd1306_UpdateScreen();
 
   //servos
@@ -509,12 +570,7 @@ uint8_t read;
      write_spi(ICM20648_REG_BANK_SEL, 0x00);
 
 
-     for (int i=0; i<5; i++){
-    	 direction= direction + read_magnetometer(&magX, &magY, &magZ,  0);
-     }
-     direction = direction /5;
-     sprintf(msg, "direction %f\r\n", direction);
-     HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+     reset(&direction,&location,&gps_data);
 
 
 
@@ -535,13 +591,23 @@ uint8_t read;
 
 
 	  // magnetometer
-	 direction = read_magnetometer(&magX, &magY, &magZ,  0);
-		 // gps
+	 //direction = read_magnetometer(&magX, &magY, &magZ,  0);
+	// gps
 	  read_gps(&line_ready, gps_line ,&gps_data, 0);
 
-		 // temperature
-	  read_temp(Temperature_buf, &ret, &val,&temp_c,1);
 
+
+		 // temperature
+	  read_temp(Temperature_buf, &ret, &val,&temp_c,0);
+
+	  if (reset_flag){
+		  reset_flag=0;
+		  reset(&direction,&location,&gps_data);
+
+
+
+
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1025,11 +1091,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
+  /*Configure GPIO pins : PB11 PB12 PB14 */
+  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_14;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB6 */
   GPIO_InitStruct.Pin = GPIO_PIN_6;
@@ -1038,12 +1104,25 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == BUTTON_RESET) {
+	    reset_flag = 1;
+  }
+}
+
+
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
