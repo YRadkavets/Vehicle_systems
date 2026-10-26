@@ -37,8 +37,10 @@ enum mode {MANUAL, FOLLOW};
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define BUTTON_READ GPIO_PIN_11
 #define BUTTON_RESET GPIO_PIN_12
 #define BUTTON_MODE GPIO_PIN_13
+
 #define DEG_TO_RAD (M_PI / 180.0)
 #define RAD_TO_DEG (180.0 / M_PI)
 /* USER CODE END PD */
@@ -71,6 +73,14 @@ int mode = MANUAL;
 
 volatile uint8_t reset_flag=0;
 volatile uint8_t mode_flag=0;
+
+// UART RX variables for user commands
+uint8_t uart_rx_byte;
+char uart_rx_buffer[64];
+uint8_t uart_rx_idx = 0;
+volatile uint8_t uart_cmd_ready = 0;
+char uart_received_cmd[64];
+
 
 //oled
 char myText[100] = ":(";
@@ -221,6 +231,8 @@ void GPS_Parse_RMC(char *line, GPS_Data_t *gps)
 
 //coordinates
 
+
+
 // Structure holding equatorial coordinates of the celestial target
 typedef struct {
     float ra_hours;    // Right Ascension in decimal hours (0.0 to 24.0 h)
@@ -233,6 +245,22 @@ typedef struct {
     float altitude_servo;  // Vertical servo angle (0 to 90 deg)
 } ServoAngles_t;
 
+
+SkyTarget_t current_target = { .ra_hours = 0.0f, .dec_deg = 0.0f };
+
+// Parses input string formatted as: "RA,DEC\n" (e.g., "6.75,-16.71\n")
+uint8_t Parse_UART_Coordinates(char *str, SkyTarget_t *target)
+{
+    float ra, dec;
+    if (sscanf(str, "%f,%f", &ra, &dec) == 2) {
+        if (ra >= 0.0f && ra <= 24.0f && dec >= -90.0f && dec <= 90.0f) {
+            target->ra_hours = ra;
+            target->dec_deg = dec;
+            return 1; // Valid
+        }
+    }
+    return 0; // Malformed input
+}
 /**
  * @brief Normalizes an angle in degrees into the [0, 360) range.
  */
@@ -704,8 +732,10 @@ int main(void)
    retVal = ssd1306_WriteString(myText, Font_6x8, White);
    ssd1306_UpdateScreen();
 
-  //servos
+  //UART
   HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
+  HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
+  //servos
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);  // Start the timer 3 for PWM on Channel 2 (PC7)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);  // Start the timer 2 for PWM on Channel 2 (PB10)
 
@@ -754,6 +784,8 @@ int main(void)
     		 .dec_deg  = 24.716f
      };
 
+     current_target = plejady;
+
      ServoAngles_t target_servos;
      uint32_t last_calc_time = 0;
 
@@ -767,6 +799,20 @@ int main(void)
 
   while (1)
   {
+
+	  if (uart_cmd_ready)
+	            {
+	                uart_cmd_ready = 0;
+	                if (Parse_UART_Coordinates(uart_received_cmd, &current_target)) {
+	                    snprintf(msg, sizeof(msg), "\r\n[OK] Set Target: RA=%.2fh, Dec=%.1f deg\r\n",
+	                             current_target.ra_hours, current_target.dec_deg);
+	                } else {
+	                    snprintf(msg, sizeof(msg), "\r\n[ERR] Invalid format! Use: RA,DEC (e.g. 6.75,-16.7)\r\n");
+	                }
+	                HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);
+	            }
+
+
 	  if (mode==MANUAL){
 	  //servos
 	  degree_1=read_potentiometer(&hadc1 );
@@ -780,7 +826,7 @@ int main(void)
 		          last_calc_time = HAL_GetTick();
 
 		          // Wylicz kąty serw
-		          Calculate_Servo_Positions(&plejady, &gps_data, direction, &target_servos);
+		          Calculate_Servo_Positions(&current_target, &gps_data, direction, &target_servos);
 
 		          // Ustaw serwo wysokości (0 do 90 stopni)
 		          servo_control(&htim2,TIM_CHANNEL_3,target_servos.altitude_servo);
@@ -1323,8 +1369,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  /*Configure GPIO pins : PB11 PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -1386,8 +1432,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         {
             gps_index = 0; // Prevent buffer overflow
         }
+    }else if (huart->Instance == USART2) // From PC USB     // Handle UART RX character-by-character from terminal
+        {
+            char c = (char)uart_rx_byte;
+
+            // Re-arm immediately
+            HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
+
+            if (c == '\r' || c == '\n')
+            {
+                if (uart_rx_idx > 0) {
+                    uart_rx_buffer[uart_rx_idx] = '\0';
+                    strcpy(uart_received_cmd, uart_rx_buffer);
+                    uart_cmd_ready = 1;
+                    uart_rx_idx = 0;
+                }
+            }
+            else if (uart_rx_idx < sizeof(uart_rx_buffer) - 1)
+            {
+                uart_rx_buffer[uart_rx_idx++] = c;
+            }
+        }
     }
-}
+
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {

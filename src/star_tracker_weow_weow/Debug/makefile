@@ -62,7 +62,7 @@ main-build: star_tracker_weow_weow.elf secondary-outputs
 
 # Tool invocations
 star_tracker_weow_weow.elf star_tracker_weow_weow.map: $(OBJS) $(USER_OBJS) C:\Users\lizar\ltu_2026\E0009E\src\star_tracker_weow_weow\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "star_tracker_weow_weow.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\lizar\ltu_2026\E0009E\src\star_tracker_weow_weow\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="star_tracker_weow_weow.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "star_tracker_weow_weow.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\lizar\ltu_2026\E0009E\src\star_tracker_weow_weow\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="star_tracker_weow_weow.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
